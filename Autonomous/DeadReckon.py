@@ -1,93 +1,87 @@
 import numpy as np
 from filterpy.kalman import ExtendedKalmanFilter
-import time
-import serial
-import smbus
+import random
+import matplotlib.pyplot as plt
 
-gps_port = '/dev/ttyUSB0'
-gps_baudrate = 9600
+# Parameters for simulation
+gps_noise_std = 1.0  # Standard deviation for GPS noise
+imu_noise_std = 0.1  # Standard deviation for IMU noise
+dt = 0.1  # Time step
 
-imu_address = 0x68
-bus = smbus.SMBus(1)
+# Create a simple trajectory for simulation
+true_x = 0
+true_y = 0
+true_vx = 1.0  # Constant velocity in x
+true_vy = 0.5  # Constant velocity in y
+num_steps = 100  # Total simulation steps
 
+# EKF initialization
 ekf = ExtendedKalmanFilter(dim_x=4, dim_z=2)
-ekf.x = np.array([0, 0, 0, 0])
-ekf.P *= 1000
-ekf.R = np.diag([5, 5])
-ekf.Q = np.eye(4) * 0.1
+ekf.x = np.array([0, true_vx, 0, true_vy])  # Initial state
+ekf.P *= 1000  # Uncertainty
+ekf.R = np.diag([gps_noise_std**2, gps_noise_std**2])  # GPS noise covariance
+ekf.Q = np.eye(4) * 0.1  # Process noise covariance
 
-def transition_function(state, dt):
+# State transition and measurement functions
+def transition_function(state):
     x, vx, y, vy = state
     return np.array([x + vx * dt, vx, y + vy * dt, vy])
-
-def transition_jacobian(state, dt):
-    return np.array([[1, dt, 0, 0],
-                     [0, 1, 0, 0],
-                     [0, 0, 1, dt],
-                     [0, 0, 0, 1]])
 
 def measurement_function(state):
     x, _, y, _ = state
     return np.array([x, y])
 
-def measurement_jacobian(state):
-    return np.array([[1, 0, 0, 0],
-                     [0, 0, 1, 0]])
+# Lists for storing results for plotting
+true_positions = []
+ekf_positions = []
 
-def read_gps():
-    with serial.Serial(gps_port, baudrate=gps_baudrate, timeout=1) as gps_data:
-        line = gps_data.readline().decode('ascii', errors='replace')
-        if line.startswith('$GPGGA'):
-            parts = line.split(',')
-            lat = float(parts[2])
-            lon = float(parts[4])
-            return lon, lat
-    return 0, 0
-
-def read_imu():
-    def read_word(register):
-        high = bus.read_byte_data(imu_address, register)
-        low = bus.read_byte_data(imu_address, register + 1)
-        value = (high << 8) + low
-        if value >= 0x8000:
-            value -= 65536
-        return value
-
-    ax = read_word(0x3B) / 16384.0
-    ay = read_word(0x3D) / 16384.0
-    return ax, ay
-
-def dead_reckoning(ax, ay, dt, vx, vy, x, y):
-    vx += ax * dt
-    vy += ay * dt
-    x += vx * dt + 0.5 * ax * dt ** 2
-    y += vy * dt + 0.5 * ay * dt ** 2
-    return x, y, vx, vy
-
-vx, vy, x, y = 0, 0, 0, 0
-last_time = time.time()
-
-while True:
-    gps_x, gps_y = read_gps()
-    ax, ay = read_imu()
+for _ in range(num_steps):
+    # Simulate true position
+    true_x += true_vx * dt
+    true_y += true_vy * dt
+    true_positions.append((true_x, true_y))
     
-    current_time = time.time()
-    dt = current_time - last_time
-    last_time = current_time
+    # Simulate GPS reading with noise
+    gps_x = true_x + random.gauss(0, gps_noise_std)
+    gps_y = true_y + random.gauss(0, gps_noise_std)
+
+    # Simulate IMU reading (here we assume constant acceleration for simplicity)
+    ax = random.gauss(0, imu_noise_std)  # Simulated acceleration in x
+    ay = random.gauss(0, imu_noise_std)  # Simulated acceleration in y
+
+    # Dead reckoning (for simplicity we will just update the velocity)
+    ekf.x[0] += ekf.x[1] * dt + 0.5 * ax * dt**2  # Update position x
+    ekf.x[2] += ekf.x[3] * dt + 0.5 * ay * dt**2  # Update position y
+
+    # EKF predict
+    ekf.F = np.array([[1, dt, 0, 0],
+                      [0, 1, 0, 0],
+                      [0, 0, 1, dt],
+                      [0, 0, 0, 1]])
     
-    dr_x, dr_y, dr_vx, dr_vy = dead_reckoning(ax, ay, dt, vx, vy, x, y)
-    
-    ekf.F = transition_jacobian(ekf.x, dt)
-    ekf.x = transition_function(ekf.x, dt)
     ekf.predict()
 
+    # Update with GPS measurement
     z = np.array([gps_x, gps_y])
-    ekf.H = measurement_jacobian(ekf.x)
-    ekf.update(z, HJacobian=measurement_jacobian, Hx=measurement_function)
-    
-    x, vx, y, vy = ekf.x
-    print(f"Estimated Position: x = {x:.6f}, y = {y:.6f}")
-    
-    vx, vy, x, y = dr_vx, dr_vy, dr_x, dr_y
-    
-    time.sleep(0.1)
+    ekf.update(z, HJacobian=lambda x: np.array([[1, 0, 0, 0], [0, 0, 1, 0]]), Hx=measurement_function)
+
+    # Store estimated position for plotting
+    ekf_positions.append((ekf.x[0], ekf.x[2]))
+
+# Convert positions for plotting
+true_positions = np.array(true_positions)
+ekf_positions = np.array(ekf_positions)
+
+# Plot results
+plt.figure(figsize=(10, 5))
+plt.plot(true_positions[:, 0], true_positions[:, 1], label='True Position', color='g', linewidth=2)
+plt.plot(ekf_positions[:, 0], ekf_positions[:, 1], label='EKF Estimated Position', color='r', linestyle='--')
+plt.xlabel('X Position')
+plt.ylabel('Y Position')
+plt.title('EKF Position Estimation vs True Position')
+plt.legend()
+plt.grid()
+plt.axis('equal')  # Set equal scaling on x and y axes
+plt.tight_layout()  # Adjust layout to fit elements
+plt.show()  # Ensure the plot is displayed
+
