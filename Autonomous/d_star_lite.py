@@ -389,18 +389,6 @@ def main():
         plt.plot()
         plt.pause(pause_time)
 
-    # Obstacles discovered at time = row
-    # time = 1, obstacles discovered at (0, 2), (9, 2), (4, 0)
-    # time = 2, obstacles discovered at (0, 1), (7, 7)
-    # ...
-    # when the spoofed obstacles are:
-    # spoofed_ox = [[0, 9, 4], [0, 7], [], [], [], [], [], [5]]
-    # spoofed_oy = [[2, 2, 0], [1, 7], [], [], [], [], [], [4]]
-
-    # Reroute
-    # spoofed_ox = [[], [], [], [], [], [], [], [40 for _ in range(10, 21)]]
-    # spoofed_oy = [[], [], [], [], [], [], [], [i for i in range(10, 21)]]
-
     # Obstacles that demostrate large rerouting
     spoofed_ox = [[], [], [],
                   [i for i in range(0, 21)] + [0 for _ in range(0, 20)]]

@@ -1,6 +1,6 @@
 import matplotlib.pyplot as plt
 from matplotlib.patches import Polygon
-import numpy as np
+import numpy as np  
 import math
 from grid_map import GridMap
     
